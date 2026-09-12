@@ -13,9 +13,10 @@ CHANNELS = [
     ('@Quantix_CashFlow', 'https://t.me/Quantix_CashFlow'),
 ] 
 
-# मीडिया को स्टोर करने के लिए डिक्शनरी और काउंटर
+# डेटाबेस और स्टोरेज
 media_database = {}
 media_counter = 0
+pinned_media = None  # डायरेक्ट /start करने वाले यूजर के लिए डिफ़ॉल्ट पिन मीडिया
 
 async def check_all_subscriptions(user_id: int, context) -> bool:
     """चेक करता है कि यूजर ने दोनों चैनल जॉइन किए हैं या नहीं"""
@@ -38,8 +39,8 @@ async def delete_message_after_delay(context, chat_id, message_id, delay_seconds
         print(f"Could not auto-delete message: {e}")
 
 async def handle_admin_upload(update, context):
-    """जब आप (एडमिन) बोट पर मीडिया भेजेंगे, यह तुरंत यूनिक लिंक जनरेट करके देगा"""
-    global media_counter
+    """जब आप (एडमिन) बोट पर मीडिया भेजेंगे, यह यूनिक लिंक देगा और इसे पिन मीडिया बना देगा"""
+    global media_counter, pinned_media
     message = update.message
     
     media_counter += 1
@@ -60,28 +61,32 @@ async def handle_admin_upload(update, context):
     else:
         return
 
-    # मीडिया की जानकारी सेव करें
-    media_database[media_id] = {
+    media_data = {
         "type": media_type,
         "file_id": file_id,
         "caption": message.caption or "🎉 **Access Granted!** Here is your media content 🔥"
     }
 
+    # डेटाबेस में सेव करें
+    media_database[media_id] = media_data
+    
+    # यह मीडिया डिफ़ॉल्ट रूप से पिन हो जाएगा (डायरेक्ट /start वालों के लिए)
+    pinned_media = media_data
+
     bot_username = context.bot.username
     unique_link = f"https://t.me/{bot_username}?start={media_id}"
     
     await message.reply_text(
-        f"✅ **Media Uploaded Successfully!**\n\n"
-        f"🔗 **Your Unique Shareable Link:**\n`{unique_link}`",
+        f"✅ **Media Uploaded & Pinned Successfully!**\n\n"
+        f"🔗 **Your Unique Shareable Link:**\n`{unique_link}`\n\n"
+        f"📌 *(This media is now set as the default Pinned Media for direct /start users)*",
         parse_mode="Markdown"
     )
 
-async def send_specific_media(chat_id, media_id, context):
+async def send_media_to_user(chat_id, media_data, context):
     """यूजर को मीडिया भेजेगा और 24 घंटे बाद डिलीट होने का टाइमर सेट करेगा"""
-    media_data = media_database.get(media_id)
-    
     if not media_data:
-        await context.bot.send_message(chat_id=chat_id, text="❌ This media link is invalid or has expired.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ No media available or expired.")
         return
 
     m_type = media_data["type"]
@@ -104,17 +109,37 @@ async def start(update, context):
     user_id = update.effective_user.id
     args = context.args  
     
-    # अगर यूजर बिना किसी यूनिक लिंक के डायरेक्ट बोट खोलता है
+    # 1. केस 1: अगर यूजर ने डायरेक्ट /start किया है (बिना किसी लिंक के)
     if not args:
-        await update.message.reply_text("👋 Welcome! Send any media file to this chat to generate a unique shareable link.")
+        is_joined = await check_all_subscriptions(user_id, context)
+        if not is_joined:
+            keyboard = []
+            for i in range(0, len(CHANNELS), 2):
+                row = []
+                row.append(InlineKeyboardButton("Join Channel 1 ↗", url=CHANNELS[i][1]))
+                if i + 1 < len(CHANNELS):
+                    row.append(InlineKeyboardButton("Join Channel 2 ↗", url=CHANNELS[i+1][1]))
+                keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔓 Claim / Verify", callback_data="claim_pinned")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            message_text = (
+                "👋 **Hello Dear, Welcome To Our Bot!**\n\n"
+                "🛑 **You must join all required channels below to access the pinned media.**\n\n"
+                "💣 **After joining both channels, click on 'Claim / Verify'.**"
+            )
+            await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+        else:
+            await send_media_to_user(user_id, pinned_media, context)
         return
 
+    # 2. केस 2: अगर यूजर किसी यूनिक लिंक से आया है (जैसे ?start=media_1)
     media_id = args[0]
     if media_id not in media_database:
         await update.message.reply_text("❌ Invalid or expired media link.")
         return
 
-    # चेक करें कि यूजर ने दोनों चैनल जॉइन किए हैं या नहीं
     is_joined = await check_all_subscriptions(user_id, context)
     
     if not is_joined:
@@ -138,8 +163,7 @@ async def start(update, context):
         await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
         return
 
-    # अगर पहले से जॉइन है तो डायरेक्ट मीडिया भेजें
-    await send_specific_media(user_id, media_id, context)
+    await send_media_to_user(user_id, media_database[media_id], context)
 
 async def button_callback(update, context):
     query = update.callback_query
@@ -148,28 +172,39 @@ async def button_callback(update, context):
     user_id = query.from_user.id
     data = query.data  
     
-    if data.startswith("claim_"):
+    # अगर यूजर डायरेक्ट स्टार्ट वाले प्रॉम्प्ट से क्लेम कर रहा है (पिन मीडिया के लिए)
+    if data == "claim_pinned":
+        is_joined = await check_all_subscriptions(user_id, context)
+        if is_joined:
+            try:
+                await query.message.delete() # बॉक्स गायब हो जाएगा
+            except Exception:
+                pass
+            await send_media_to_user(user_id, pinned_media, context)
+        else:
+            await query.answer("❌ You haven't joined all channels yet! Please join both channels and try again.", show_alert=True)
+            
+    # अगर यूजर किसी यूनिक लिंक वाले प्रॉम्प्ट से क्लेम कर रहा है
+    elif data.startswith("claim_"):
         media_id = data.split("_", 1)[1] 
         is_joined = await check_all_subscriptions(user_id, context)
         
         if is_joined:
             try:
-                # सही से जॉइन करने पर प्रॉम्प्ट बॉक्स गायब हो जाएगा
-                await query.message.delete()
+                await query.message.delete() # बॉक्स गायब हो जाएगा
             except Exception:
                 pass
             
-            # यूजर को वीडियो मिल जाएगी
-            await send_specific_media(user_id, media_id, context)
+            media_data = media_database.get(media_id)
+            await send_media_to_user(user_id, media_data, context)
         else:
-            # अगर जॉइन नहीं किया है तो इंग्लिश में पॉप-अप अलर्ट दिखेगा
             await query.answer("❌ You haven't joined all channels yet! Please join both channels and try again.", show_alert=True)
 
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_callback, pattern="^claim_"))
+    app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_admin_upload))
 
     print("Bot is running perfectly with all features...")
@@ -177,3 +212,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+                                                
