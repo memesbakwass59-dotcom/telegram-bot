@@ -7,13 +7,13 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 TOKEN = '8830625955:AAGyQEyDiOHP97Dv9DFYsdvoc5jJC1MQBR4'
 
-# आपके दोनों चैनल और ग्रुप
+# आपके दोनों अनिवार्य चैनल और ग्रुप
 CHANNELS = [
     ('@quantixcashflow', 'https://t.me/quantixcashflow'),
     ('@Quantix_CashFlow', 'https://t.me/Quantix_CashFlow'),
 ] 
 
-# मीडिया को स्टोर करने के लिए डेटाबेस
+# मीडिया को स्टोर करने के लिए डिक्शनरी और काउंटर
 media_database = {}
 media_counter = 0
 
@@ -30,7 +30,7 @@ async def check_all_subscriptions(user_id: int, context) -> bool:
     return True
 
 async def delete_message_after_delay(context, chat_id, message_id, delay_seconds):
-    """24 घंटे बाद वीडियो/मीडिया को ऑटोमैटिक डिलीट करने के लिए फंक्शन"""
+    """24 घंटे (86400 सेकंड) बाद यूजर के पास भेजा गया मीडिया ऑटोमैटिक डिलीट कर देगा"""
     await asyncio.sleep(delay_seconds)
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
@@ -38,7 +38,7 @@ async def delete_message_after_delay(context, chat_id, message_id, delay_seconds
         print(f"Could not auto-delete message: {e}")
 
 async def handle_admin_upload(update, context):
-    """जब आप बोट पर वीडियो भेजेंगे, यह तुरंत यूनिक लिंक जनरेट करके देगा"""
+    """जब आप (एडमिन) बोट पर मीडिया भेजेंगे, यह तुरंत यूनिक लिंक जनरेट करके देगा"""
     global media_counter
     message = update.message
     
@@ -60,11 +60,11 @@ async def handle_admin_upload(update, context):
     else:
         return
 
-    # मीडिया डिटेल्स सेव करें
+    # मीडिया की जानकारी सेव करें
     media_database[media_id] = {
         "type": media_type,
         "file_id": file_id,
-        "caption": message.caption or "🎉 **Access Granted!** Here is your video content 🔥"
+        "caption": message.caption or "🎉 **Access Granted!** Here is your media content 🔥"
     }
 
     bot_username = context.bot.username
@@ -72,12 +72,12 @@ async def handle_admin_upload(update, context):
     
     await message.reply_text(
         f"✅ **Media Uploaded Successfully!**\n\n"
-        f"🔗 **Your Shareable Link:**\n`{unique_link}`",
+        f"🔗 **Your Unique Shareable Link:**\n`{unique_link}`",
         parse_mode="Markdown"
     )
 
 async def send_specific_media(chat_id, media_id, context):
-    """यूजर को मीडिया भेजेगा और 24 घंटे बाद डिलीट होने का टास्क सेट करेगा"""
+    """यूजर को मीडिया भेजेगा और 24 घंटे बाद डिलीट होने का टाइमर सेट करेगा"""
     media_data = media_database.get(media_id)
     
     if not media_data:
@@ -96,7 +96,7 @@ async def send_specific_media(chat_id, media_id, context):
     elif m_type == "document":
         sent_msg = await context.bot.send_document(chat_id=chat_id, document=f_id, caption=cap, parse_mode="Markdown")
 
-    # 24 घंटे (86400 सेकंड्स) बाद मैसेज डिलीट करने के लिए बैकग्राउंड टास्क शुरू करें
+    # 24 घंटे (86400 सेकंड) बाद मैसेज डिलीट करने के लिए बैकग्राउंड टास्क
     if sent_msg:
         asyncio.create_task(delete_message_after_delay(context, chat_id, sent_msg.message_id, 86400))
 
@@ -104,8 +104,9 @@ async def start(update, context):
     user_id = update.effective_user.id
     args = context.args  
     
+    # अगर यूजर बिना किसी यूनिक लिंक के डायरेक्ट बोट खोलता है
     if not args:
-        await update.message.reply_text("👋 Welcome! Send any media file to this chat to generate a unique promotion link.")
+        await update.message.reply_text("👋 Welcome! Send any media file to this chat to generate a unique shareable link.")
         return
 
     media_id = args[0]
@@ -113,7 +114,7 @@ async def start(update, context):
         await update.message.reply_text("❌ Invalid or expired media link.")
         return
 
-    # चेक करें कि यूजर ने चैनल जॉइन किया है या नहीं
+    # चेक करें कि यूजर ने दोनों चैनल जॉइन किए हैं या नहीं
     is_joined = await check_all_subscriptions(user_id, context)
     
     if not is_joined:
@@ -153,13 +154,15 @@ async def button_callback(update, context):
         
         if is_joined:
             try:
-                await query.message.delete() # जॉइन करने पर प्रॉपर बॉक्स गायब हो जाएगा
+                # सही से जॉइन करने पर प्रॉम्प्ट बॉक्स गायब हो जाएगा
+                await query.message.delete()
             except Exception:
                 pass
             
+            # यूजर को वीडियो मिल जाएगी
             await send_specific_media(user_id, media_id, context)
         else:
-            # अगर जॉइन नहीं किया है तो इंग्लिश में अलर्ट दिखेगा
+            # अगर जॉइन नहीं किया है तो इंग्लिश में पॉप-अप अलर्ट दिखेगा
             await query.answer("❌ You haven't joined all channels yet! Please join both channels and try again.", show_alert=True)
 
 def main():
@@ -167,9 +170,9 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_callback, pattern="^claim_"))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.DOCUMENT, handle_admin_upload))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_admin_upload))
 
-    print("Bot is running successfully with auto-delete & unique links...")
+    print("Bot is running perfectly with all features...")
     app.run_polling()
 
 if __name__ == '__main__':
