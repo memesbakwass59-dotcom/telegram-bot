@@ -1,17 +1,19 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import logging
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+
+# Enable logging so you can see errors in Render logs
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 # Use your token from BotFather
 TOKEN = '8830625955:AAGyQEyDiOHP97Dv9DFYsdvoc5jJC1MQBR4'
 
-# Your 2 actual channels
 CHANNELS = [
     ('@quantixcashflow', 'https://t.me/quantixcashflow'),
     ('@Quantix_CashFlow', 'https://t.me/Quantix_CashFlow'),
 ] 
 
-async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Real-time check to see if the user is a member of all configured channels"""
+async def check_all_subscriptions(user_id: int, context) -> bool:
     for channel, _ in CHANNELS:
         try:
             member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
@@ -22,16 +24,12 @@ async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TY
             return False
     return True
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     user_id = update.effective_user.id
-    
-    # Check if the user has joined all channels
     is_joined = await check_all_subscriptions(user_id, context)
     
     if not is_joined:
         keyboard = []
-        
-        # Generates side-by-side 'Join' buttons matching your requested style
         for i in range(0, len(CHANNELS), 2):
             row = []
             row.append(InlineKeyboardButton("Join ↗", url=CHANNELS[i][1]))
@@ -39,9 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row.append(InlineKeyboardButton("Join ↗", url=CHANNELS[i+1][1]))
             keyboard.append(row)
         
-        # Add the Claim / Check button at the bottom
         keyboard.append([InlineKeyboardButton("🔓 Claim", callback_data="check_sub")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         message_text = (
@@ -53,10 +49,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
         return
 
-    # 🟢 ACCESS GRANTED: Put your bot's main content or features here
     await update.message.reply_text("🎉 Welcome back! You have successfully completed all steps and now have access to the bot.")
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_callback(update, context):
     query = update.callback_query
     await query.answer()
     
@@ -68,12 +63,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.answer("❌ You haven't joined all channels yet! Please check again.", show_alert=True)
 
-if __name__ == '__main__':
+def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_callback, pattern="check_sub"))
 
-    print("Bot style template is running...")
+    print("Bot is starting polling...")
     app.run_polling()
-  
+
+if __name__ == '__main__':
+    main()
+    
